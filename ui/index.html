@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Rust 学習支援（MVP）</title>
+  <link rel="stylesheet" href="style.css" />
+  <!-- Monaco Loader -->
+  <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.44.0/min/vs/loader.js"></script>
+  <script>
+    // Monacoのベースパス
+    require.config({ paths: { 'vs': 'https://cdn.jsdelivr.net/npm/monaco-editor@0.44.0/min/vs' }});
+  </script>
+  <script src="script.js" defer></script>
+</head>
+<body>
+  <header class="app-header">
+    <h1 class="title">Rust 学習支援</h1>
+    <div id="status" class="badge badge-idle">準備OK</div>
+  </header>
+
+  <main class="layout">
+    <section class="panel">
+      <h2 class="panel-title">問題</h2>
+      <p class="desc">add_world関数を用いて、<code>s1</code> を <code>"hello"</code> から <code>"hello world"</code> に変えよ。</p>
+      <div class="controls">
+        <button id="runBtn" class="btn primary">実行（Ctrl+Enter）</button>
+        <button id="resetBtn" class="btn">リセット</button>
+      </div>
+      <div id="editor" class="editor"></div>
+    </section>
+
+    <section class="panel">
+      <h2 class="panel-title">▶ 出力</h2>
+      <pre id="output" class="output"></pre>
+    </section>
+  </main>
+</body>
+</html>
