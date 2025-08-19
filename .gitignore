@@ -1,0 +1,34 @@
+# --- Rust (server) ---
+/target/
+**/*.rs.bk
+
+# --- Node/Frontend (ui) ---
+/ui/node_modules/
+/ui/dist/
+/ui/build/
+/ui/.parcel-cache/
+/ui/.vite/
+/ui/.next/
+/ui/.nuxt/
+/ui/.cache/
+
+# --- Env / Secrets ---
+.env
+.env.*
+/server/.env
+/ui/.env
+
+# --- Logs ---
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# --- Editor / IDE ---
+.vscode/
+.idea/
+*.swp
+
+# --- OS ---
+.DS_Store
+Thumbs.db
