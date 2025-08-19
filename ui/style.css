@@ -1,7 +1,7 @@
 :root{
   --bg:#0b0f17; --fg:#e5e7eb; --muted:#94a3b8;
   --panel:#111827; --border:#1f2937;
-  --ok:#10b981; --warn:#f59e0b; --err:#ef4444; --idle:#64748b;
+  --ok:#10b981; --warn:#f59e0b; --err:#ef4444; --info:#64748b;
   --btn:#2563eb; --btn-hover:#1d4ed8;
   --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   --sans: system-ui, -apple-system, Segoe UI, Roboto, Noto Sans JP, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
@@ -23,10 +23,16 @@ body{
   padding:6px 10px; border-radius:999px; font-size:12px; font-weight:600;
   border:1px solid var(--border);
 }
-.badge-idle{ background:#0f172a; color:var(--idle); }
+.badge-info{ background:#0f172a; color:var(--info); }
 .badge-ok{ background:rgba(16,185,129,.1); color:var(--ok); border-color:rgba(16,185,129,.4); }
-.badge-warn{ background:rgba(245,158,11,.1); color:var(--warn); border-color:rgba(245,158,11,.4); }
+.badge-warn{ background:rgba(245, 229, 11, 0.1); color:var(--warn); border-color:rgba(245,158,11,.4); }
 .badge-err{ background:rgba(239,68,68,.1); color:var(--err); border-color:rgba(239,68,68,.4); }
+
+.panel-title-row{
+  display:flex; align-items:center; gap:8px;
+  margin:6px 0 8px;
+}
+.panel-title-row .panel-title{ margin:0; } /* 上書き：見出しとバッジを詰める */
 
 .layout{
   display:grid; grid-template-columns:1fr; gap:16px; padding:16px;
@@ -56,6 +62,7 @@ body{
 .readonlyTop, .readonlyBottom{
   background: rgba(148,163,184,.10);
 }
-.editableArea{
+.editable-range{
   background: rgba(59,130,246,.06);
 }
+

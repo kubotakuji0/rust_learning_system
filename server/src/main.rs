@@ -29,7 +29,7 @@ async fn run(req: web::Json<RunReq>) -> impl Responder {
             timed_out: false,
             stdout: String::new(),
             stderr: err.clone(),
-            used_add_world: req.code.contains("add_world("),
+            used_add_world: req.code.contains("add_world(&mut s1);"),
             output: err,
         });
     }
@@ -59,7 +59,7 @@ async fn run(req: web::Json<RunReq>) -> impl Responder {
                         timed_out: false,
                         stdout: String::new(),
                         stderr: err.clone(),
-                        used_add_world: req.code.contains("add_world("),
+                        used_add_world: req.code.contains("add_world(&mut s1);"),
                         output: err,
                     });
                 }
@@ -70,7 +70,7 @@ async fn run(req: web::Json<RunReq>) -> impl Responder {
                         timed_out: true,
                         stdout: String::new(),
                         stderr: err.clone(),
-                        used_add_world: req.code.contains("add_world("),
+                        used_add_world: req.code.contains("add_world(&mut s1);"),
                         output: err,
                     });
                 }
@@ -85,7 +85,7 @@ async fn run(req: web::Json<RunReq>) -> impl Responder {
                 timed_out: false,
                 stdout,
                 stderr,
-                used_add_world: req.code.contains("add_world("),
+                used_add_world: req.code.contains("add_world(&mut s1);"),
                 output: combined,
             })
         }
@@ -96,7 +96,7 @@ async fn run(req: web::Json<RunReq>) -> impl Responder {
                 timed_out: false,
                 stdout: String::new(),
                 stderr: err.clone(),
-                used_add_world: req.code.contains("add_world("),
+                used_add_world: req.code.contains("add_world(&mut s1);"),
                 output: err,
             })
         }
@@ -107,7 +107,7 @@ async fn run(req: web::Json<RunReq>) -> impl Responder {
                 timed_out: false,
                 stdout: String::new(),
                 stderr: err.clone(),
-                used_add_world: req.code.contains("add_world("),
+                used_add_world: req.code.contains("add_world(&mut s1);"),
                 output: err,
             })
         }

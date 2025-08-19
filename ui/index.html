@@ -16,7 +16,6 @@
 <body>
   <header class="app-header">
     <h1 class="title">Rust 学習支援</h1>
-    <div id="status" class="badge badge-idle">準備OK</div>
   </header>
 
   <main class="layout">
@@ -31,7 +30,10 @@
     </section>
 
     <section class="panel">
-      <h2 class="panel-title">▶ 出力</h2>
+      <div class="panel-title-row">
+        <h2 class="panel-title">▶ 出力</h2>
+        <div id="status" class="badge badge-idle">準備OK</div>
+      </div>
       <pre id="output" class="output"></pre>
     </section>
   </main>
