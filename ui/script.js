@@ -56,7 +56,11 @@ fn add_world(s: &mut String) {
   
   updateEditableDecoration();
 
-  function isEditingKey(k) {
+  function isEditingKey(e) {
+    const k  = e.keyCode;
+    const be = e.browserEvent;
+
+    //ナビゲーションキー
     const nav = new Set([
       monaco.KeyCode.LeftArrow,
       monaco.KeyCode.RightArrow,
@@ -69,13 +73,28 @@ fn add_world(s: &mut String) {
     ]);
     if (nav.has(k)) return false;
 
-    return (
-      k === monaco.KeyCode.Backspace ||
-      k === monaco.KeyCode.Delete   ||
-      k === monaco.KeyCode.Enter    ||
-      k === monaco.KeyCode.Tab      ||
-      (k >= monaco.KeyCode.Space && k <= monaco.KeyCode.KeyZ)
-    );
+    if (e.ctrlKey || e.metaKey) {
+    // 編集のショートカット
+    const editingCombos = new Set([
+      monaco.KeyCode.KeyV, // Paste
+      monaco.KeyCode.KeyX, // Cut
+      monaco.KeyCode.KeyZ, // Undo
+      monaco.KeyCode.KeyY, // Redo
+    ]);
+    if (editingCombos.has(k)) return true;
+    return false;
+    }
+    //Shift+Insert
+    if (e.shiftKey && k === monaco.KeyCode.Insert) return true;
+    // 単体で編集になるキー
+    if (k === monaco.KeyCode.Backspace || k === monaco.KeyCode.Delete ||
+        k === monaco.KeyCode.Enter    || k === monaco.KeyCode.Tab) return true;
+
+    // 実際に1文字が入力される場合だけ true
+    const printable = be && typeof be.key === 'string' &&
+                      be.key.length === 1 &&
+                      !be.ctrlKey && !be.metaKey && !be.altKey;
+    return !!printable;
   }
 
   editor.onKeyDown(function (e) {
@@ -84,7 +103,7 @@ fn add_world(s: &mut String) {
     const column = pos.column;
     const bottomLine = bottomStartLine();
     //上２行で編集キー
-    if (line <= NON_EDITABLE_TOP_LINES && isEditingKey(e.keyCode)) {
+    if (line <= NON_EDITABLE_TOP_LINES && isEditingKey(e)) {
       e.preventDefault(); e.stopPropagation();
       return;
     }
@@ -94,7 +113,7 @@ fn add_world(s: &mut String) {
       return;
     }
     //下部の編集不可領域での編集キー
-    if (line >= bottomLine && isEditingKey(e.keyCode)) {
+    if (line >= bottomLine && isEditingKey(e)) {
       e.preventDefault(); e.stopPropagation();
       return;
     }
@@ -104,6 +123,7 @@ fn add_world(s: &mut String) {
     const cur   = model.getLinesContent();
     const edits = [];
 
+    //上側の復旧
     for (let i = 0; i < fixedTop.length; i++) {
       if (cur[i] !== fixedTop[i]) {
         const r = new monaco.Range(i + 1, 1, i + 1, model.getLineMaxColumn(i + 1));
@@ -111,6 +131,7 @@ fn add_world(s: &mut String) {
       }
     }
 
+    //下側の復旧
     const offset = cur.length - fixedBottom.length;
     for (let i = 0; i < fixedBottom.length; i++) {
       const idx = offset + i;
@@ -119,6 +140,16 @@ fn add_world(s: &mut String) {
         edits.push({ range, text: fixedBottom[i], forceMoveMarkers: true });
       }
     }
+  //編集可能列の保護
+  const bottomLine = bottomStartLine(); // println! を含む行（1始まり）
+  const editableLines = Math.max(0, bottomLine - EDITABLE_START_LINE);
+  const lacking = 1 - editableLines;
+  if (lacking > 0) {
+    // 3行目の先頭に空行を必要数だけ差し込む
+    const insertAt = new monaco.Range(EDITABLE_START_LINE, 1, EDITABLE_START_LINE, 1);
+    edits.push({ range: insertAt, text: '\n'.repeat(lacking), forceMoveMarkers: true });
+  }
+
     if (edits.length) {
       editor.executeEdits(null, edits);
     }
@@ -133,7 +164,7 @@ fn add_world(s: &mut String) {
 
   function setStatus(kind, text) { // kind: 'ok'|'warn'|'err'|'info'
   const map = { ok:'badge badge-ok', warn:'badge badge-warn', err:'badge badge-err', info:'badge badge-info' };
-  $status.className = map[kind] || map.idle;
+  $status.className = map[kind] || map.info;
   $status.textContent = text;
 }
 
