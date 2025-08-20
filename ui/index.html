@@ -22,6 +22,7 @@
     <section class="panel">
       <h2 class="panel-title">問題</h2>
       <p class="desc">add_world関数を用いて、s1を"hello"から"hello world"に変えよ。</p>
+      <p class="desc">編集できるのは3行目〜println!の直前です。Ctrl + Enter で実行。</p>
       <div class="controls">
         <button id="runBtn" class="btn primary">実行（Ctrl+Enter）</button>
         <button id="resetBtn" class="btn">リセット</button>
@@ -32,9 +33,9 @@
     <section class="panel">
       <div class="panel-title-row">
         <h2 class="panel-title">▶ 出力</h2>
-        <div id="status" class="badge badge-idle">準備OK</div>
+        <div id="status" class="badge badge-info">準備OK</div>
       </div>
-      <pre id="output" class="output"></pre>
+      <pre id="output" class="output">ここに出力が表示されます</pre>
     </section>
   </main>
 </body>

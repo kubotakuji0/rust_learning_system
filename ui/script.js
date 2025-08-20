@@ -25,6 +25,7 @@ fn add_world(s: &mut String) {
   const expectedStdout = 'hello world.\n';
 
   const lines = originalCode.split('\n');
+  const fixedTop = lines.slice(0,NON_EDITABLE_TOP_LINES);
   let endIndex = lines.findIndex(l => l.includes('println!("{}.", s1)'));
   if (endIndex === -1) endIndex = lines.length - 1; // 保険
   const fixedBottom = lines.slice(endIndex); // println! を含む行〜末尾
@@ -102,6 +103,14 @@ fn add_world(s: &mut String) {
   editor.onDidChangeModelContent(function () {
     const cur   = model.getLinesContent();
     const edits = [];
+
+    for (let i = 0; i < fixedTop.length; i++) {
+      if (cur[i] !== fixedTop[i]) {
+        const r = new monaco.Range(i + 1, 1, i + 1, model.getLineMaxColumn(i + 1));
+        edits.push({ range: r, text: fixedTop[i], forceMoveMarkers: true });
+      }
+    }
+
     const offset = cur.length - fixedBottom.length;
     for (let i = 0; i < fixedBottom.length; i++) {
       const idx = offset + i;
@@ -176,7 +185,7 @@ fn add_world(s: &mut String) {
     if (confirm('コードをリセットしますか？')) {
       editor.setValue(originalCode);
       setStatus('info', 'リセットしました');
-      $output.textContent = '（ここに表示されます）';
+      $output.textContent = 'ここに出力が表示されます';
     }
   });
 });
