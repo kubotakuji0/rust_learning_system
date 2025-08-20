@@ -123,7 +123,7 @@ fn add_world(s: &mut String) {
   const $output  = document.getElementById('output');
 
   function setStatus(kind, text) { // kind: 'ok'|'warn'|'err'|'info'
-  const map = { ok:'badge badge-ok', warn:'badge badge-warn', err:'badge badge-err', info:'badge badge-idle' };
+  const map = { ok:'badge badge-ok', warn:'badge badge-warn', err:'badge badge-err', info:'badge badge-info' };
   $status.className = map[kind] || map.idle;
   $status.textContent = text;
 }

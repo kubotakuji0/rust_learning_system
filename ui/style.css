@@ -52,7 +52,7 @@ body{
 .btn.primary{ background:var(--btn); border-color:transparent; }
 .btn.primary:hover{ background:var(--btn-hover); }
 
-.editor{ height:420px; border:1px solid var(--border); border-radius:10px; overflow:hidden; }
+.editor{ height:220px; border:1px solid var(--border); border-radius:10px; overflow:hidden; }
 .output{
   background:#000; color:#e5e7eb; border:1px solid var(--border);
   padding:10px; border-radius:10px; min-height:120px; font-family:var(--mono); white-space:pre-wrap;
