@@ -1,32 +1,35 @@
-//AMDローダの読み込み確認
-if (typeof require === 'undefined') {
-  console.warn('[Monaco] AMD loader がまだ読み込まれていません');
-}
-//AMDローダにパス設定を渡す
-require.config({
-  paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs' }
-});
-
-//Monacoの読み込み
-require(['vs/editor/editor.main'], function () {
-  //初期コード
-  const originalCode = `fn main() {
-    let mut s1 = String::from("hello");
-    // この部分を編集してください
-    println!("{}.", s1);
+// ▼ 追加：問題IDをURLクエリ ?id=q01 から取得（無ければ q01）
+function getProblemIdFromURL() {
+  const p = new URLSearchParams(location.search).get('id');
+  return p || 'q01';
 }
 
-fn add_world(s: &mut String) {
-    s.push_str(" world");
-}`;
+// ▼ 追加：問題をAPIから取得
+async function fetchProblem(id) {
+  const res = await fetch(`/api/problems/${encodeURIComponent(id)}`);
+  if (!res.ok) throw new Error('問題を取得できませんでした');
+  return await res.json(); // ProblemDto
+}
 
-  const NON_EDITABLE_TOP_LINES = 2;                 // 1〜2行目は常に編集不可
-  const EDITABLE_START_LINE    = NON_EDITABLE_TOP_LINES + 1; // 3行目から編集可
-  const expectedStdout = 'hello world.\n';
+//Monacoの読み込み（問題を取得してから初期化）
+require(['vs/editor/editor.main'], async function () {
+  const problemId = getProblemIdFromURL();
+  const p = await fetchProblem(problemId);
 
-  const lines = originalCode.split('\n');
-  const fixedTop = lines.slice(0,NON_EDITABLE_TOP_LINES);
-  let endIndex = lines.findIndex(l => l.includes('println!("{}.", s1)'));
+  // 問題文をDOMに反映
+  document.querySelector('.panel-title').textContent = '問題';
+  document.querySelector('.desc').innerHTML = p.prompt_html;
+
+  // 初期コードと判定条件（DB由来）
+  const originalCode = p.starter_code;
+  const TOP_LOCK_LINES = p.top_lock_lines;
+  const EDIT_START    = TOP_LOCK_LINES + 1;
+  const EXPECTED_OUT  = p.expected_stdout;
+  const BOTTOM_ANCHOR = p.bottom_anchor;
+
+  const lines = originalCode.replace(/\r\n/g, '\n').split('\n');
+  const fixedTop = lines.slice(0,TOP_LOCK_LINES);
+  let endIndex = lines.findIndex(l => l.includes(BOTTOM_ANCHOR));
   if (endIndex === -1) endIndex = lines.length - 1; // 保険
   const fixedBottom = lines.slice(endIndex); // println! を含む行〜末尾
 
@@ -47,9 +50,9 @@ fn add_world(s: &mut String) {
   }
 
   function updateEditableDecoration() {
-    const endLine = Math.max(EDITABLE_START_LINE, bottomStartLine() - 1);
+    const endLine = Math.max(EDIT_START, bottomStartLine() - 1);
     decorations = editor.deltaDecorations(decorations, [{
-      range: new monaco.Range(EDITABLE_START_LINE, 1, endLine, 1),
+      range: new monaco.Range(EDIT_START, 1, endLine, 1),
       options: { isWholeLine: true, className: 'editable-range', inlineClassName: 'editable-range' },
     }]);
   }
@@ -103,12 +106,12 @@ fn add_world(s: &mut String) {
     const column = pos.column;
     const bottomLine = bottomStartLine();
     //上２行で編集キー
-    if (line <= NON_EDITABLE_TOP_LINES && isEditingKey(e)) {
+    if (line <= TOP_LOCK_LINES && isEditingKey(e)) {
       e.preventDefault(); e.stopPropagation();
       return;
     }
     //３行目左端でバックスペースキー
-    if (line === EDITABLE_START_LINE && column === 1 && e.keyCode === monaco.KeyCode.Backspace) {
+    if (line === EDIT_START && column === 1 && e.keyCode === monaco.KeyCode.Backspace) {
       e.preventDefault(); e.stopPropagation();
       return;
     }
@@ -142,11 +145,11 @@ fn add_world(s: &mut String) {
     }
   //編集可能列の保護
   const bottomLine = bottomStartLine(); // println! を含む行（1始まり）
-  const editableLines = Math.max(0, bottomLine - EDITABLE_START_LINE);
+  const editableLines = Math.max(0, bottomLine - EDIT_START);
   const lacking = 1 - editableLines;
   if (lacking > 0) {
     // 3行目の先頭に空行を必要数だけ差し込む
-    const insertAt = new monaco.Range(EDITABLE_START_LINE, 1, EDITABLE_START_LINE, 1);
+    const insertAt = new monaco.Range(EDIT_START, 1, EDIT_START, 1);
     edits.push({ range: insertAt, text: '\n'.repeat(lacking), forceMoveMarkers: true });
   }
 
@@ -181,7 +184,7 @@ fn add_world(s: &mut String) {
     if (resp.timed_out) { setStatus('err', 'タイムアウト');   return; }
 
     const stdoutOnly = normalizeOut(resp.stdout ?? '');
-    const okOut = stdoutOnly ? (stdoutOnly === expectedStdout) : (out === expectedStdout);
+    const okOut = stdoutOnly ? (stdoutOnly === EXPECTED_OUT) : (out === EXPECTED_OUT);
 
     if (!okOut) {
       setStatus('warn', '出力不一致');
@@ -199,7 +202,7 @@ fn add_world(s: &mut String) {
       const code = editor.getValue();
       const resp = await fetch('/run', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code })
+        body: JSON.stringify({ problem_id: problemId, code })
       });
       const json = await resp.json();
       showResult(json);
