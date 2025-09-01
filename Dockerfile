@@ -1,12 +1,11 @@
 # ========= Build stage =========
-FROM rust:1.84-slim AS builder
+FROM rust:1.86-slim AS builder
 WORKDIR /app
 COPY server/ /app/server/
 RUN cd /app/server && cargo build --release
 
 # ========= Runtime stage =========
-FROM rust:1.84-slim
-RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libsqlite3-dev && rm -rf /var/lib/apt/lists/*
+FROM rust:1.86-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tini && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=builder /app/server/target/release/server /app/server
@@ -15,3 +14,6 @@ ENV RUST_LOG=info
 EXPOSE 8080
 ENTRYPOINT ["/usr/bin/tini","--"]
 CMD ["/app/server"]
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential pkg-config ca-certificates \
+ && rm -rf /var/lib/apt/lists/*

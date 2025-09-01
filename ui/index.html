@@ -1,16 +1,42 @@
 <!DOCTYPE html>
 <html lang="ja">
+  
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Rust 学習支援</title>
+  <link rel="icon" href="data:,"><!-- favicon 404 回避 -->
   <link rel="stylesheet" href="style.css" />
-  <!-- Monaco Loader -->
-  <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js"></script>
+
   <script>
-    // Monacoのベースパス
-    require.config({ paths: { 'vs': 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs' }});
+    // Monaco のバージョン（必要ならここだけ変える）
+    window.MONACO_VERSION = '0.45.0';
   </script>
+
+  <!-- AMD loader -->
+  <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js"></script>
+
+  <script>
+    // Monaco のベースパス
+    require.config({
+      paths: {
+        'vs': 'https://cdn.jsdelivr.net/npm/monaco-editor@' + window.MONACO_VERSION + '/min/vs'
+      }
+    });
+
+    // Worker を Blob 経由で読み込む（CORS/パス問題回避）
+    window.MonacoEnvironment = {
+      getWorkerUrl: function () {
+        const v = window.MONACO_VERSION;
+        const code = `
+          self.MonacoEnvironment = { baseUrl: 'https://cdn.jsdelivr.net/npm/monaco-editor@${v}/min/' };
+          importScripts('https://cdn.jsdelivr.net/npm/monaco-editor@${v}/min/vs/base/worker/workerMain.js');
+        `;
+        return URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
+      }
+    };
+  </script>
+
+  <!-- あなたの JS は最後に（defer で OK） -->
   <script src="script.js" defer></script>
 </head>
 <body>
@@ -20,15 +46,22 @@
 
   <main class="layout">
     <section class="panel">
-      <h2 class="panel-title">問題</h2>
-      <p class="desc">add_world関数を用いて、s1を"hello"から"hello world"に変えよ。</p>
-      <p class="desc">編集できるのは3行目〜println!の直前です。Ctrl + Enter で実行。</p>
-      <div class="controls">
-        <button id="runBtn" class="btn primary">実行（Ctrl+Enter）</button>
-        <button id="resetBtn" class="btn">リセット</button>
+      <div class="panel-title-row">
+        <h2 class="panel-title">▶ 問題</h2>
+        <select id="problemSelect" class="select"></select>
+      </div>
+      <div id="problemDesc" class="problem-desc"></div>
+    </section>
+
+    <!-- ▼ 追加：エディター＋実行ボタン -->
+    <section class="panel">
+      <div class="panel-title-row">
+        <h2 class="panel-title">▶ エディター</h2>
+        <button id="runBtn" class="btn primary">実行</button>
       </div>
       <div id="editor" class="editor"></div>
     </section>
+    <!-- ▲ 追加ここまで -->
 
     <section class="panel">
       <div class="panel-title-row">

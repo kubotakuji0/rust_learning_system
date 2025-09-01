@@ -4,7 +4,7 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ./ui:/app/ui:ro
-      - ./server/data.db:/app/data.db
+      - ./data:/app/data           # ★ 読み書き
     environment:
       - RUST_LOG=info
+      - DATABASE_URL=sqlite:///app/data/data.db   # ★ ここを三本スラッシュに

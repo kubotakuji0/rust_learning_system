@@ -1,11 +1,69 @@
 use actix_files::Files;
-use actix_web::{middleware::Logger, get, post, web, App, HttpResponse, HttpServer, Responder};
+use actix_web::{
+    get, post, web, App, HttpResponse, HttpServer, Responder,
+    middleware::{Logger, DefaultHeaders},
+};
 use serde::{Deserialize, Serialize};
-use tokio::{process::Command, time::{timeout, Duration}};
-use sqlx::{SqlitePool, Row};
+use std::{
+    path::{Path, PathBuf},
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
+use tokio::{fs, process::Command, time::timeout};
+use sqlx::{SqlitePool, FromRow};
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteSynchronous};
+use chrono::Utc;
+
+/* ==================== CSP（Monaco のための最小セット） ==================== */
+const CSP: &str = concat!(
+    "default-src 'self'; ",
+    "script-src 'self' 'unsafe-eval' 'unsafe-inline' https://cdn.jsdelivr.net; ",
+    "worker-src 'self' blob:; ",
+    "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; ",
+    "font-src 'self' data: https://cdn.jsdelivr.net; ",
+    "img-src 'self' data:; ",
+    "connect-src 'self';"
+);
+
+/* ==================== アプリ状態 ==================== */
+
+#[derive(Clone)]
+struct AppState {
+    pool: SqlitePool,
+}
+
+/* ==================== データモデル ==================== */
+
+#[derive(FromRow, Serialize)]
+struct Problem {
+    id: i64,
+    slug: String,
+    title: String,
+    description: String,
+    starter_code: String,
+    expected_stdout: String,
+    fixed_top: Option<String>,
+    fixed_bottom: Option<String>,
+    // ★ 追加: 編集範囲マーカー（NULL可）
+    editable_start_marker: Option<String>,
+    editable_end_marker:   Option<String>,
+    created_at: String,
+}
+
+// 最小構成の submissions
+#[derive(FromRow)]
+struct Submission {
+    id: i64,
+    problem_id: i64,
+    code: String,
+    output: String,
+    created_at: String,
+}
 
 #[derive(Deserialize)]
-struct RunReq { problem_id: String, code: String }
+struct RunReq {
+    problem_id: i64,
+    code: String,
+}
 
 #[derive(Serialize)]
 struct RunResp {
@@ -13,211 +71,204 @@ struct RunResp {
     timed_out: bool,
     stdout: String,
     stderr: String,
-    uses_add_world: bool,
-    output: String,     // stdout+stderr
-    passed: bool,       // ★ 追加：合否（UIでは未使用でも将来のため返却）
+    passed: bool,
+    output: String,
 }
 
-#[derive(Serialize)]
-struct ProblemDto {
-    id: String,
-    title: String,
-    prompt_html: String,
-    starter_code: String,
-    expected_stdout: String,
-    top_lock_lines: i64,
-    bottom_anchor: String,
-    language: String,
-    checks: Vec<CheckDto>,
-}
-#[derive(Serialize)]
-struct CheckDto { kind: String, pattern: String }
+/* ==================== コンパイル＆実行 ==================== */
 
-/// GET /api/problems/{id} : 問題取得（UIはこれで初期化）
+async fn run_user_code(code: &str) -> anyhow::Result<(bool, bool, String, String)> {
+    let nanos = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+    let work_dir = PathBuf::from(format!("/tmp/run-{}", nanos));
+    fs::create_dir_all(&work_dir).await?;
+
+    let src = work_dir.join("main.rs");
+    fs::write(&src, code).await?;
+
+    let bin = work_dir.join("app-bin");
+    let compile_out = Command::new("rustc")
+        .arg(&src)
+        .arg("-O")
+        .arg("-o")
+        .arg(&bin)
+        .output()
+        .await?;
+
+    if !compile_out.status.success() {
+        let stderr = String::from_utf8_lossy(&compile_out.stderr).to_string();
+        return Ok((false, false, String::new(), stderr));
+    }
+
+    let run_fut = Command::new(&bin).output();
+    let out = match timeout(Duration::from_secs(2), run_fut).await {
+        Ok(Ok(o)) => o,
+        Ok(Err(e)) => return Ok((true, false, String::new(), format!("exec error: {e}"))),
+        Err(_) => return Ok((true, true, String::new(), String::new())),
+    };
+
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+    Ok((true, false, stdout, stderr))
+}
+
+/* ==================== ヘルパ：提出保存 ==================== */
+
+async fn save_submission(pool: &SqlitePool, problem_id: i64, code: &str, output: &str) {
+    if let Err(e) = sqlx::query(
+        r#"
+        INSERT INTO submissions (problem_id, code, output, created_at)
+        VALUES (?, ?, ?, ?)
+        "#,
+    )
+    .bind(problem_id)
+    .bind(code)
+    .bind(output)
+    .bind(Utc::now().to_rfc3339())
+    .execute(pool)
+    .await
+    {
+        eprintln!("[save_submission] insert failed: {e}");
+    }
+}
+
+/* ==================== ハンドラ ==================== */
+
+#[get("/api/problems")]
+async fn list_problems(state: web::Data<AppState>) -> impl Responder {
+    let rows = sqlx::query_as::<_, Problem>(
+        r#"
+        SELECT
+          id, slug, title, description, starter_code, expected_stdout,
+          fixed_top, fixed_bottom,
+          editable_start_marker, editable_end_marker,
+          created_at
+        FROM problems
+        ORDER BY id
+        "#,
+    )
+    .fetch_all(&state.pool)
+    .await;
+
+    match rows {
+        Ok(v) => HttpResponse::Ok().json(v),
+        Err(e) => {
+            eprintln!("[/api/problems] sqlx error: {e}");
+            HttpResponse::InternalServerError().body(format!("db error: {e}"))
+        }
+    }
+}
+
 #[get("/api/problems/{id}")]
-async fn get_problem(path: web::Path<String>, pool: web::Data<SqlitePool>) -> impl Responder {
+async fn get_problem(path: web::Path<i64>, state: web::Data<AppState>) -> impl Responder {
     let id = path.into_inner();
-    let row = match sqlx::query("select id,title,prompt_html,starter_code,expected_stdout,top_lock_lines,bottom_anchor,language from problems where id=?1")
-        .bind(&id).fetch_one(pool.get_ref()).await {
-        Ok(r) => r,
-        Err(_) => return HttpResponse::NotFound().body("problem not found")
-    };
-    let mut dto = ProblemDto {
-        id: row.get(0), title: row.get(1), prompt_html: row.get(2),
-        starter_code: row.get(3), expected_stdout: row.get(4),
-        top_lock_lines: row.get::<i64,_>(5), bottom_anchor: row.get(6),
-        language: row.get(7), checks: vec![],
-    };
-    let checks = sqlx::query("select kind, pattern from problem_checks where problem_id=?1")
-        .bind(&dto.id).fetch_all(pool.get_ref()).await.unwrap_or_default();
-    dto.checks = checks.into_iter()
-        .map(|r| CheckDto { kind: r.get(0), pattern: r.get(1) })
-        .collect();
-    HttpResponse::Ok().json(dto)
-}
+    let row = sqlx::query_as::<_, Problem>(
+        r#"
+        SELECT
+          id, slug, title, description, starter_code, expected_stdout,
+          fixed_top, fixed_bottom,
+          editable_start_marker, editable_end_marker,
+          created_at
+        FROM problems
+        WHERE id = ?
+        "#,
+    )
+    .bind(id)
+    .fetch_one(&state.pool)
+    .await;
 
-/// 簡易：ルール評価（must_contain / must_not_contain）
-fn evaluate_checks(code: &str, checks: &[(String,String)]) -> bool {
-    for (kind, pat) in checks {
-        match kind.as_str() {
-            "must_contain"     => if !code.contains(pat) { return false; },
-            "must_not_contain" => if  code.contains(pat) { return false; },
-            _ => {}
+    match row {
+        Ok(p) => HttpResponse::Ok().json(p),
+        Err(sqlx::Error::RowNotFound) => HttpResponse::NotFound().finish(),
+        Err(e) => {
+            eprintln!("[/api/problems/{id}] sqlx error: {e}");
+            HttpResponse::InternalServerError().body(format!("db error: {e}"))
         }
     }
-    true
 }
 
-/// add_world の有無（互換用）
-fn check_add_world_usage(src: &str) -> bool { src.contains("add_world(") }
+#[post("/api/run")]
+async fn run(req: web::Json<RunReq>, state: web::Data<AppState>) -> impl Responder {
+    let p = sqlx::query_as::<_, Problem>(
+        r#"
+        SELECT
+          id, slug, title, description, starter_code, expected_stdout,
+          fixed_top, fixed_bottom,
+          editable_start_marker, editable_end_marker,
+          created_at
+        FROM problems
+        WHERE id = ?
+        "#,
+    )
+    .bind(req.problem_id)
+    .fetch_one(&state.pool)
+    .await;
 
-#[post("/run")]
-async fn run(req: web::Json<RunReq>, pool: web::Data<SqlitePool>) -> impl Responder {
-    // 問題情報を取得（期待出力・チェック用）
-    let prow = match sqlx::query("select expected_stdout from problems where id=?1")
-        .bind(&req.problem_id).fetch_one(pool.get_ref()).await {
-        Ok(r) => r,
-        Err(_) => return HttpResponse::BadRequest().body("invalid problem_id")
-    };
-    let expected_stdout: String = prow.get(0);
-    let checks = sqlx::query("select kind, pattern from problem_checks where problem_id=?1")
-        .bind(&req.problem_id).fetch_all(pool.get_ref()).await
-        .unwrap_or_default()
-        .into_iter().map(|r| (r.get::<String,_>(0), r.get::<String,_>(1))).collect::<Vec<_>>();
-
-    // 一時ファイルに保存
-    let src = req.code.clone();
-    let path_rs = "/tmp/main.rs";
-    let bin_path = "/tmp/a.out";
-    if let Err(e) = tokio::fs::write(path_rs, &src).await {
-        let err = format!("write error: {e}");
-        let uses = check_add_world_usage(&req.code);
-        // 保存
-        let _ = sqlx::query(r#"insert into submissions (problem_id,code,compiled,timed_out,stdout,stderr,passed,uses_add_world,duration_ms)
-          values (?1,?2,0,0,'',?3,0,?4,NULL)"#)
-          .bind(&req.problem_id).bind(&req.code).bind(&err).bind(uses)
-          .execute(pool.get_ref()).await;
-        return HttpResponse::Ok().json(RunResp {
-            compiled: false, timed_out: false,
-            stdout: String::new(), stderr: err.clone(),
-            uses_add_world: uses, output: err, passed: false,
-        });
-    }
-
-    // コンパイル
-    let compile_res = Command::new("rustc")
-        .arg(path_rs).arg("-O").arg("-o").arg(bin_path)
-        .kill_on_drop(true)
-        .output().await;
-
-    match compile_res {
-        Ok(out) if out.status.success() => {
-            // 実行（2秒）
-            let start = std::time::Instant::now();
-            let run_fut = Command::new(bin_path).kill_on_drop(true).output();
-            let output = match timeout(Duration::from_secs(2), run_fut).await {
-                Ok(Ok(o)) => o,
-                Ok(Err(e)) => {
-                    let err = format!("exec error: {e}");
-                    let uses = check_add_world_usage(&req.code);
-                    let _ = sqlx::query(r#"insert into submissions (problem_id,code,compiled,timed_out,stdout,stderr,passed,uses_add_world,duration_ms)
-                      values (?1,?2,1,0,'',?3,0,?4,NULL)"#)
-                      .bind(&req.problem_id).bind(&req.code).bind(&err).bind(uses)
-                      .execute(pool.get_ref()).await;
-                    return HttpResponse::Ok().json(RunResp {
-                      compiled: true, timed_out: false,
-                      stdout: String::new(), stderr: err.clone(),
-                      uses_add_world: uses, output: err, passed: false,
-                    });
-                }
-                Err(_) => {
-                    let err = String::from("timed out (2s)");
-                    let uses = check_add_world_usage(&req.code);
-                    let _ = sqlx::query(r#"insert into submissions (problem_id,code,compiled,timed_out,stdout,stderr,passed,uses_add_world,duration_ms)
-                      values (?1,?2,1,1,'',?3,0,?4,NULL)"#)
-                      .bind(&req.problem_id).bind(&req.code).bind(&err).bind(uses)
-                      .execute(pool.get_ref()).await;
-                    return HttpResponse::Ok().json(RunResp {
-                      compiled: true, timed_out: true,
-                      stdout: String::new(), stderr: err.clone(),
-                      uses_add_world: uses, output: err, passed: false,
-                    });
-                }
-            };
-
-            let dur = start.elapsed().as_millis() as i64;
-            let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-            let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-            let combined = format!("{}{}", stdout, stderr);
-
-            // 合否判定：期待出力一致 & ルールOK
-            let passed = stdout.replace("\r\n","\n") == expected_stdout
-                      && evaluate_checks(&req.code, &checks);
-
-            let uses = check_add_world_usage(&req.code);
-            // 保存
-            let _ = sqlx::query(r#"insert into submissions
-              (problem_id,code,compiled,timed_out,stdout,stderr,passed,uses_add_world,duration_ms)
-              values (?1,?2,1,0,?3,?4,?5,?6,?7)"#)
-              .bind(&req.problem_id).bind(&req.code)
-              .bind(&stdout).bind(&stderr)
-              .bind(passed).bind(uses).bind(dur)
-              .execute(pool.get_ref()).await;
-
-            HttpResponse::Ok().json(RunResp {
-                compiled: true, timed_out: false,
-                stdout, stderr, uses_add_world: uses,
-                output: combined, passed
-            })
-        }
-        Ok(out) => {
-            let err = String::from_utf8_lossy(&out.stderr).into_owned();
-            let uses = check_add_world_usage(&req.code);
-            let _ = sqlx::query(r#"insert into submissions
-              (problem_id,code,compiled,timed_out,stdout,stderr,passed,uses_add_world,duration_ms)
-              values (?1,?2,0,0,'',?3,0,?4,NULL)"#)
-              .bind(&req.problem_id).bind(&req.code)
-              .bind(&err).bind(uses)
-              .execute(pool.get_ref()).await;
-
-            HttpResponse::Ok().json(RunResp {
-                compiled: false, timed_out: false,
-                stdout: String::new(), stderr: err.clone(),
-                uses_add_world: uses, output: err, passed: false
-            })
+    let problem = match p {
+        Ok(p) => p,
+        Err(sqlx::Error::RowNotFound) => {
+            return HttpResponse::BadRequest().body("invalid problem_id");
         }
         Err(e) => {
-            let err = format!("spawn rustc failed: {e}");
-            let uses = check_add_world_usage(&req.code);
-            let _ = sqlx::query(r#"insert into submissions
-              (problem_id,code,compiled,timed_out,stdout,stderr,passed,uses_add_world,duration_ms)
-              values (?1,?2,0,0,'',?3,0,?4,NULL)"#)
-              .bind(&req.problem_id).bind(&req.code)
-              .bind(&err).bind(uses)
-              .execute(pool.get_ref()).await;
-
-            HttpResponse::Ok().json(RunResp {
-                compiled: false, timed_out: false,
-                stdout: String::new(), stderr: err.clone(),
-                uses_add_world: uses, output: err, passed: false
-            })
+            return HttpResponse::InternalServerError().body(format!("db error: {e}"));
         }
-    }
+    };
+
+    let (compiled, timed_out, stdout, stderr) = match run_user_code(&req.code).await {
+        Ok(t) => t,
+        Err(e) => return HttpResponse::InternalServerError().body(format!("runner error: {e}")),
+    };
+
+    let passed = if compiled && !timed_out {
+        stdout.trim_end() == problem.expected_stdout.trim_end()
+    } else {
+        false
+    };
+
+    // 画面表示用の最終メッセージ
+    let output = if compiled && !timed_out {
+        if stderr.is_empty() { stdout.clone() } else { format!("{}{}", stdout, stderr) }
+    } else if timed_out {
+        "Time limit exceeded".to_string()
+    } else {
+        stderr.clone()
+    };
+
+    // 最小構成の submissions に保存
+    save_submission(&state.pool, problem.id, &req.code, &output).await;
+
+    HttpResponse::Ok().json(RunResp { compiled, timed_out, stdout, stderr, passed, output })
 }
+
+/* ==================== 起動 ==================== */
 
 #[actix_web::main]
 async fn main() -> anyhow::Result<()> {
     env_logger::init_from_env(env_logger::Env::default().default_filter_or("info"));
 
-    // SQLite を作成・接続し、マイグレーションを流す
-    let pool = SqlitePool::connect("sqlite://./data.db").await?;
-    // 簡易マイグレーション適用（本格運用では sqlx::migrate! を使う）
-    // ここでは migrations/*.sql を自前で流す代わりに、初回は手動で流してもOK
+    // DB_PATH を使って“ファイル名指定”で接続
+    let db_path = std::env::var("DB_PATH").unwrap_or_else(|_| "/app/data/data.db".into());
+    if !Path::new(&db_path).exists() {
+        anyhow::bail!("DB not found at {db_path}. Please pre-create it.");
+    }
+
+    let opts = SqliteConnectOptions::new()
+        .filename(&db_path)
+        .create_if_missing(false)
+        .journal_mode(SqliteJournalMode::Wal)
+        .synchronous(SqliteSynchronous::Normal);
+
+    let pool = SqlitePool::connect_with(opts).await?;
+
+    // 外部キー ON（安全策）
+    let _ = sqlx::query("PRAGMA foreign_keys = ON;").execute(&pool).await;
 
     HttpServer::new(move || {
         App::new()
-            .app_data(web::Data::new(pool.clone()))
+            .app_data(web::Data::new(AppState { pool: pool.clone() }))
             .wrap(Logger::default())
+            .wrap(DefaultHeaders::new().add(("Content-Security-Policy", CSP)))
+            .service(web::resource("/favicon.ico").to(|| async { HttpResponse::NoContent().finish() }))
+            .service(list_problems)
             .service(get_problem)
             .service(run)
             .service(Files::new("/", "/app/ui").index_file("index.html"))
@@ -225,5 +276,6 @@ async fn main() -> anyhow::Result<()> {
     .bind(("0.0.0.0", 8080))?
     .run()
     .await?;
+
     Ok(())
 }

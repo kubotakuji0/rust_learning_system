@@ -66,3 +66,8 @@ body{
   background: rgba(59,130,246,.06);
 }
 
+.select { background:#111827; color:#e5e7eb; padding:.4rem .6rem; border:1px solid #374151; border-radius:.4rem; }
+.problem-desc { margin-top:.5rem; color:#9ca3af; white-space:pre-wrap; }
+.badge-success{ background:#065f46; }
+.badge-danger{ background:#7f1d1d; }
+
